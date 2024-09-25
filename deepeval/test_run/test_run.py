@@ -1,5 +1,7 @@
 import os
 import json
+import tempfile
+
 from pydantic import BaseModel, Field
 from typing import Any, Optional, List, Dict, Union
 import shutil
@@ -27,8 +29,9 @@ from deepeval.utils import (
 )
 from deepeval.test_run.cache import global_test_run_cache_manager
 
-TEMP_FILE_NAME = "temp_test_run_data.json"
-
+with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.json') as temp_file:
+    TEMP_FILE_NAME = temp_file.name
+# TEMP_FILE_NAME = f"temp_test_run_data_{get_unique_id()}.json"
 
 class MetricScoreType(BaseModel):
     metric: str
@@ -265,6 +268,8 @@ class TestRun(BaseModel):
 
     @classmethod
     def load(cls, f):
+        # data = f.read()
+        # print(data)
         data: dict = json.load(f)
         return cls(**data)
 
@@ -279,13 +284,15 @@ class TestRun(BaseModel):
 class TestRunManager:
     def __init__(self):
         self.test_run = None
-        self.temp_file_name = TEMP_FILE_NAME
+        with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.json') as temp_file:
+            self.temp_file_name = temp_file.name
         self.save_to_disk = False
         self.disable_request = False
 
     def reset(self):
         self.test_run = None
-        self.temp_file_name = TEMP_FILE_NAME
+        with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.json') as temp_file:
+            self.temp_file_name = temp_file.name
         self.save_to_disk = False
         self.disable_request = False
 
@@ -322,7 +329,9 @@ class TestRunManager:
                     mode="r",
                     flags=portalocker.LOCK_SH | portalocker.LOCK_NB,
                 ) as file:
+                    print(f"{self.temp_file_name} for {self.test_run.test_cases}")
                     self.test_run = self.test_run.load(file)
+                    print(self.test_run)
             except (
                 FileNotFoundError,
                 portalocker.exceptions.LockException,
@@ -348,6 +357,7 @@ class TestRunManager:
         api_test_case: Union[LLMApiTestCase, ConversationalApiTestCase],
         test_case: Union[LLMTestCase, ConversationalTestCase, MLLMTestCase],
     ):
+        print("update test run")
         if self.save_to_disk:
             try:
                 with portalocker.Lock(
@@ -722,10 +732,13 @@ class TestRunManager:
 
     def save_test_run_locally(self):
         local_folder = os.getenv("DEEPEVAL_RESULTS_FOLDER")
+        print(f"LOCAL FOLDER {local_folder}")
         if local_folder:
             new_test_filename = datetime.datetime.now().strftime(
                 "%Y%m%d_%H%M%S"
             )
+            print("RENAMING TEMP FILE")
+            print(new_test_filename)
             os.rename(self.temp_file_name, new_test_filename)
             if not os.path.exists(local_folder):
                 os.mkdir(local_folder)
@@ -736,11 +749,15 @@ class TestRunManager:
                     f"""❌ Error: DEEPEVAL_RESULTS_FOLDER={local_folder} already exists and is a file.\nDetailed results won't be saved. Please specify a folder or an available path."""
                 )
             else:
+                print("should copy")
                 shutil.copy(new_test_filename, local_folder)
+                print("Does not reach here")
                 print(f"Results saved in {local_folder} as {new_test_filename}")
             os.remove(new_test_filename)
 
     def wrap_up_test_run(self, runDuration: float, display_table: bool = True):
+        print("WRAP UP TEST RUN")
+
         test_run = self.get_test_run()
         if test_run is None:
             print("Test Run is empty, please try again.")
@@ -777,6 +794,7 @@ class TestRunManager:
         if display_table:
             self.display_results_table(test_run)
 
+        print("SAVE LOCALLY")
         self.save_test_run_locally()
         delete_file_if_exists(self.temp_file_name)
 
@@ -789,3 +807,4 @@ class TestRunManager:
 
 
 global_test_run_manager = TestRunManager()
+print(f"GLOBAL INITIATED AS {global_test_run_manager.temp_file_name}")

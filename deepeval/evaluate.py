@@ -41,6 +41,7 @@ from deepeval.test_run import (
     TestRunManager,
     TestRun,
 )
+print(f"initiate in evaluate as {global_test_run_manager.temp_file_name}")
 from deepeval.utils import get_is_running_deepeval
 from deepeval.test_run.cache import (
     global_test_run_cache_manager,
@@ -508,11 +509,13 @@ async def a_execute_test_cases(
     test_run_manager: Optional[TestRunManager] = None,
     _use_bar_indicator: bool = True,
 ) -> List[TestResult]:
-
     global_test_run_cache_manager.disable_write_cache = save_to_disk == False
+    print(f"global manager {global_test_run_manager.temp_file_name}")
 
     if test_run_manager is None:
         test_run_manager = global_test_run_manager
+    print(f"manager {global_test_run_manager.temp_file_name}")
+
 
     test_run_manager.save_to_disk = save_to_disk
     test_run = test_run_manager.get_test_run()
@@ -557,6 +560,7 @@ async def a_execute_test_cases(
             total=len(test_cases),
             bar_format="{desc}: |{bar}|{percentage:3.0f}% ({n_fmt}/{total_fmt}) [Time Taken: {elapsed}, {rate_fmt}{postfix}]",
         ) as pbar:
+            print(f"test cases {test_cases}")
             for test_case in test_cases:
                 with capture_evaluation_run("test case"):
                     if isinstance(test_case, LLMTestCase):
@@ -730,6 +734,7 @@ async def a_execute_llm_test_cases(
     for metric in metrics:
         metric_data = create_metric_data(metric)
         api_test_case.update_metric_data(metric_data)
+        print("Update metric data")
 
         if metric.error is None:
             cache_metric_data = deepcopy(metric_data)
@@ -941,8 +946,10 @@ def evaluate(
                 "A `model` and `prompt template` key must be provided when logging `hyperparameters`."
             )
         hyperparameters = process_hyperparameters(hyperparameters)
-
     global_test_run_manager.reset()
+    print(f"RESET GLOBAL TEST RUN for {test_cases}\n")
+    print(f"Temp file init {global_test_run_manager.temp_file_name} for {test_cases}\n")
+
     start_time = time.perf_counter()
 
     if show_indicator:
@@ -951,12 +958,33 @@ def evaluate(
             console.print(
                 format_metric_description(metric, async_mode=run_async)
             )
+    print(f"After indicator {global_test_run_manager.temp_file_name} for {test_cases}")
 
-    with capture_evaluation_run("evaluate()"):
-        if run_async:
-            loop = get_or_create_event_loop()
-            test_results = loop.run_until_complete(
-                a_execute_test_cases(
+    print(f"CAPTURE RUN for {test_cases}")
+    try:
+        with capture_evaluation_run("evaluate()"):
+            if run_async:
+                try:
+                    loop = get_or_create_event_loop()
+                except Exception as e:
+                    print(e)
+                print("EXECUTING TEST RESULTS")
+                print(f"Before executing temp file {global_test_run_manager.temp_file_name} for {test_cases}")
+                test_results = loop.run_until_complete(
+                    a_execute_test_cases(
+                        test_cases,
+                        metrics,
+                        ignore_errors=ignore_errors,
+                        use_cache=use_cache,
+                        verbose_mode=verbose_mode,
+                        save_to_disk=write_cache,
+                        show_indicator=show_indicator,
+                        throttle_value=throttle_value,
+                    )
+                )
+            else:
+                print("not async")
+                test_results = execute_test_cases(
                     test_cases,
                     metrics,
                     ignore_errors=ignore_errors,
@@ -964,20 +992,9 @@ def evaluate(
                     verbose_mode=verbose_mode,
                     save_to_disk=write_cache,
                     show_indicator=show_indicator,
-                    throttle_value=throttle_value,
                 )
-            )
-        else:
-            test_results = execute_test_cases(
-                test_cases,
-                metrics,
-                ignore_errors=ignore_errors,
-                use_cache=use_cache,
-                verbose_mode=verbose_mode,
-                save_to_disk=write_cache,
-                show_indicator=show_indicator,
-            )
-
+    except Exception as e:
+        print(e)
     end_time = time.perf_counter()
     run_duration = end_time - start_time
     if print_results:
@@ -985,10 +1002,13 @@ def evaluate(
             print_test_result(test_result)
 
         aggregate_metric_pass_rates(test_results)
-
+    print(f"get test run {test_cases}")
     test_run = global_test_run_manager.get_test_run()
     test_run.hyperparameters = hyperparameters
+    print("SAVE TEST RUN")
     global_test_run_manager.save_test_run()
+    print("WRAP UP")
+
     global_test_run_manager.wrap_up_test_run(run_duration, display_table=False)
     return test_results
 
